@@ -1,6 +1,6 @@
 # 考研数学《880》智能拼好卷生成器
 
-基于 Streamlit 的在线智能组卷工具。内置 1121 条题目元数据和 23 章 Markdown 正文，可按章节、题型、难度和专项标签进行无放回加权抽样，支持网页预览以及适配 GoodNotes 的两种 A4 PDF。
+基于 Streamlit 的在线智能组卷工具。内置 1121 条题目元数据和 23 章 Markdown 正文，可按章节、题型、难度、专项标签及个人做题历史进行无放回加权抽样，支持 DeepSeek 智能解析、网页预览以及适配 GoodNotes 的两种 A4 PDF。
 
 ## 仓库结构
 
@@ -57,9 +57,23 @@ Community Cloud 会自动读取：
 
 - 云端优先使用 WeasyPrint；Linux 系统依赖由 `packages.txt` 自动安装。
 - 字体回退顺序为 Noto Sans CJK SC、WenQuanYi Micro Hei、WenQuanYi Zen Hei、PingFang SC、Microsoft YaHei、sans-serif。
-- LaTeX 在导出前转换为 MathML，选择/填空紧凑排版，解答题保留 120 mm 横线书写区。
+- LaTeX 在导出前优先转换为 SVG 矢量公式，确保上下标、分式、积分限和求和限稳定；复杂公式保留 MathML 回退。
 - 纯享版只含题干；解析版在末尾附加已有答案、解析与踩坑提示。
 - Windows 本地缺少 GTK/Pango 时，会自动回退到 Edge/Chrome 无头打印。
+
+## DeepSeek 智能解析
+
+可以直接在侧边栏临时输入 API Key，也可以在 Streamlit Cloud 应用的 **Settings → Secrets** 中添加：
+
+```toml
+DEEPSEEK_API_KEY = "sk-你的密钥"
+```
+
+密钥不会写入 GitHub；云端 Secret 也不会回传到浏览器。默认使用 `deepseek-v4-flash`，可切换 `deepseek-v4-pro`。生成内容会进入当前网页和解析版 PDF，但大模型答案仍建议结合教材复核。
+
+## 未见题优先与个人进度
+
+每次组卷后，本次题号会写入当前页面 URL 中的压缩进度标记。只要保留该链接，刷新或再次打开时仍会优先抽取从未出现的题；公共网站的不同访客不会共享记录。侧边栏可随时关闭“优先抽取从未出现的题”或清空记录。
 
 ## 本地运行与测试
 

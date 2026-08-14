@@ -17,6 +17,8 @@ class PaperRequest:
     difficulty_weights: dict[str, float] = field(default_factory=dict)
     tag: str = "全部"
     seed: int | None = None
+    seen_question_ids: set[str] = field(default_factory=set)
+    prefer_unseen: bool = True
 
 
 class PaperEngine:
@@ -46,9 +48,15 @@ class PaperEngine:
             if len(pool) < desired:
                 warnings.append(f"{question_type}仅找到 {len(pool)} 题，少于请求的 {desired} 题。")
             for _ in range(min(desired, len(pool))):
-                weights = [self._score(q, request.difficulty_weights, seen_knowledge) for q in pool]
+                active_pool = pool
+                if request.prefer_unseen:
+                    unseen_pool = [q for q in pool if q.id not in request.seen_question_ids]
+                    if unseen_pool:
+                        active_pool = unseen_pool
+                weights = [self._score(q, request.difficulty_weights, seen_knowledge) for q in active_pool]
                 chosen_index = self._weighted_index(weights, rng)
-                chosen = pool.pop(chosen_index)
+                chosen = active_pool[chosen_index]
+                pool.remove(chosen)
                 selected.append(chosen)
                 seen_knowledge.update(set(chosen.core_knowledge))
 

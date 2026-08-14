@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import html
+import base64
+import io
 import re
 import subprocess
 import sys
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 import markdown
@@ -127,29 +130,54 @@ class PDFExporter:
     @classmethod
     def _markdown(cls, value: str) -> str:
         rendered = markdown.markdown(value or "", extensions=["extra", "sane_lists"])
-        return cls._math_to_mathml(rendered)
+        return cls._math_to_vector(rendered)
 
-    @staticmethod
-    def _math_to_mathml(rendered: str) -> str:
-        try:
-            from latex2mathml.converter import convert
-        except Exception:
-            return rendered
-
+    @classmethod
+    def _math_to_vector(cls, rendered: str) -> str:
         def block(match: re.Match[str]) -> str:
-            try:
-                return f'<div class="math-block">{convert(match.group(1).strip())}</div>'
-            except Exception:
-                return match.group(0)
+            return cls._formula_html(match.group(1), block=True)
 
         def inline(match: re.Match[str]) -> str:
-            try:
-                return convert(match.group(1).strip())
-            except Exception:
-                return match.group(0)
+            return cls._formula_html(match.group(1), block=False)
 
         rendered = BLOCK_MATH.sub(block, rendered)
         return INLINE_MATH.sub(inline, rendered)
+
+    @staticmethod
+    @lru_cache(maxsize=4096)
+    def _formula_svg(latex: str) -> str:
+        from matplotlib.mathtext import math_to_image
+
+        buffer = io.BytesIO()
+        math_to_image(
+            f"${html.unescape(latex.strip())}$",
+            buffer,
+            format="svg",
+            dpi=144,
+            color="#1d1c18",
+        )
+        return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    @classmethod
+    def _formula_html(cls, latex: str, block: bool) -> str:
+        try:
+            encoded = cls._formula_svg(latex)
+            image = f'<img class="math-formula" alt="{html.escape(latex.strip())}" src="data:image/svg+xml;base64,{encoded}">'
+            return f'<div class="math-block">{image}</div>' if block else image
+        except Exception:
+            return cls._formula_mathml(latex, block)
+
+    @staticmethod
+    def _formula_mathml(latex: str, block: bool) -> str:
+        try:
+            from latex2mathml.converter import convert
+        except Exception:
+            return f"$${latex}$$" if block else f"${latex}$"
+        try:
+            converted = convert(html.unescape(latex.strip()))
+            return f'<div class="math-block">{converted}</div>' if block else converted
+        except Exception:
+            return f"$${latex}$$" if block else f"${latex}$"
 
     @staticmethod
     def _document(body: str, title: str) -> str:
@@ -166,5 +194,7 @@ class PDFExporter:
 .missing {{ opacity:.72; }} .missing .question-body {{ border:1px dashed #c9a79f; padding:3mm; }} .page-break {{ break-before:page; }}
 .solutions h1 {{ color:#9f2d20; }} .solution {{ break-inside:avoid; border-bottom:1px solid #ddd; padding:0 0 5mm; margin-bottom:5mm; }}
 .solution h3 {{ margin-bottom:2mm; }} .solution strong {{ display:block; color:#9f2d20; margin:2mm 0 1mm; }} .pitfall {{ background:#f5eee8; border-left:3px solid #9f2d20; padding:2mm 3mm; }}
-code {{ font-family:monospace; font-size:9pt; }} math {{ font-size:1.02em; }} .math-block {{ text-align:center; margin:3mm 0; }}
+code {{ font-family:monospace; font-size:9pt; }} math {{ font-size:1.02em; }}
+.math-formula {{ display:inline-block; width:auto; max-width:100%; vertical-align:-0.25em; }}
+.math-block {{ text-align:center; margin:3mm 0; }} .math-block .math-formula {{ display:block; margin:0 auto; max-height:38mm; }}
 </style></head><body>{body}</body></html>"""

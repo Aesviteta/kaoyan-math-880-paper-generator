@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import os
 import re
 from pathlib import Path
 
@@ -8,7 +9,9 @@ import streamlit as st
 
 from config import get_content_dir, get_data_dir
 from data_loader import DataLoader
+from deepseek_client import DeepSeekClient, DeepSeekError
 from engine import PaperEngine, PaperRequest
+from history import decode_seen, encode_seen
 from models import Paper, Question
 from pdf_exporter import PDFExportError, PDFExporter
 
@@ -263,7 +266,7 @@ def subject_chapters(chapters: list[str], questions: list[Question]) -> dict[str
     }
 
 
-def render_question(question: Question, number: int) -> None:
+def render_question(question: Question, number: int, ai_generated: bool = False) -> None:
     with st.container(border=True):
         st.markdown('<span class="question-anchor"></span>', unsafe_allow_html=True)
         st.markdown(
@@ -292,6 +295,8 @@ def render_question(question: Question, number: int) -> None:
             st.markdown(f'<div class="tag-row">{tag_html}</div>', unsafe_allow_html=True)
 
         with st.expander("查看解析 · 答案 · 易错提醒", expanded=False):
+            if ai_generated:
+                st.caption("以下内容由 DeepSeek 生成，请以教材与标准答案为准。")
             if question.answer:
                 st.markdown("#### 参考答案")
                 st.markdown(question.answer)
@@ -318,6 +323,9 @@ def build_paper(
     difficulty_weights: dict[str, int],
     selected_tag: str,
     seed: int,
+    seen_question_ids: set[str],
+    prefer_unseen: bool,
+    all_question_ids: list[str],
 ) -> None:
     if not questions:
         st.error("题库为空，请检查数据源。")
@@ -339,10 +347,32 @@ def build_paper(
         difficulty_weights=difficulty_weights,
         tag=selected_tag,
         seed=seed,
+        seen_question_ids=seen_question_ids,
+        prefer_unseen=prefer_unseen,
     )
     st.session_state.paper = PaperEngine(questions).generate(request)
+    updated_seen = seen_question_ids | {question.id for question in st.session_state.paper.questions}
+    st.session_state.seen_question_ids = updated_seen
+    st.query_params["seen"] = encode_seen(updated_seen, all_question_ids)
     st.session_state.pop("pdf_clean", None)
     st.session_state.pop("pdf_solutions", None)
+
+
+def configured_secret(name: str) -> str:
+    try:
+        return str(st.secrets.get(name, "") or "")
+    except Exception:
+        return ""
+
+
+def apply_ai_solutions(paper: Paper, cache: dict[str, dict[str, str]]) -> None:
+    for question in paper.questions:
+        generated = cache.get(question.id)
+        if not generated:
+            continue
+        question.answer = generated.get("answer") or question.answer
+        question.analysis = generated.get("analysis") or question.analysis
+        question.pitfall_analysis = generated.get("pitfall") or question.pitfall_analysis
 
 
 inject_styles()
@@ -381,6 +411,11 @@ report = load_bank(data_path, content_path)
 questions = report.questions
 chapters = unique_chapters(questions)
 subjects = subject_chapters(chapters, questions)
+all_question_ids = [question.id for question in questions]
+query_seen_ids = decode_seen(str(st.query_params.get("seen", "")), all_question_ids)
+session_seen_ids = set(st.session_state.get("seen_question_ids", set()))
+seen_question_ids = query_seen_ids | session_seen_ids
+st.session_state.seen_question_ids = seen_question_ids
 
 with st.sidebar:
     st.markdown("### 01　题量结构")
@@ -416,6 +451,29 @@ with st.sidebar:
     preferred = [tag for tag in ("高频真题变式", "易错概念", "压轴题型") if tag in available_tags]
     other = [tag for tag in available_tags if tag not in preferred]
     selected_tag = st.selectbox("专项聚焦", ["全部", *preferred, *other])
+
+    st.markdown("### 04　训练进度")
+    prefer_unseen = st.toggle("优先抽取从未出现的题", value=True)
+    st.caption(f"已标记 {len(seen_question_ids)} / {len(questions)} 题；记录仅属于当前链接，不会影响其他用户。")
+    if st.button("清空已出题记录", use_container_width=True):
+        st.query_params.pop("seen", None)
+        st.session_state.pop("seen_question_ids", None)
+        st.session_state.pop("paper", None)
+        st.rerun()
+
+    st.markdown("### 05　DeepSeek 解析")
+    secret_key = configured_secret("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
+    entered_api_key = st.text_input(
+        "API Key",
+        value="",
+        type="password",
+        placeholder="已配置云端密钥" if secret_key else "sk-…",
+        help="仅用于当前会话调用 DeepSeek，不会写入题库或 GitHub；云端 Secret 不会回传到浏览器。",
+    )
+    deepseek_api_key = entered_api_key.strip() or secret_key
+    if secret_key and not entered_api_key:
+        st.caption("已启用 Streamlit Secrets 中的云端密钥。")
+    deepseek_model = st.selectbox("解析模型", ["deepseek-v4-flash", "deepseek-v4-pro"])
 
     with st.expander("试卷标题与随机种子", expanded=False):
         paper_title = st.text_input("试卷标题", "【拼好卷 01】全科交叉扫描")
@@ -473,10 +531,15 @@ if generate_sidebar or generate_main:
         difficulty_weights,
         selected_tag,
         int(random_seed),
+        seen_question_ids,
+        prefer_unseen,
+        all_question_ids,
     )
 
 paper: Paper | None = st.session_state.get("paper")
 if paper:
+    ai_solution_cache: dict[str, dict[str, str]] = st.session_state.setdefault("ai_solution_cache", {})
+    apply_ai_solutions(paper, ai_solution_cache)
     for warning in paper.warnings:
         st.warning(warning)
 
@@ -487,6 +550,53 @@ if paper:
         <div class="paper-score"><strong>{len(paper.questions)}</strong><span>QUESTIONS<br>{knowledge_count} 个核心考点</span></div></section>""",
         unsafe_allow_html=True,
     )
+    if st.button(
+        "再组一套 · 优先未见题",
+        type="primary",
+        use_container_width=True,
+        key="regenerate_main",
+    ):
+        build_paper(
+            questions,
+            paper_title,
+            counts,
+            selected_chapters,
+            difficulty_weights,
+            selected_tag,
+            int(random_seed),
+            seen_question_ids,
+            prefer_unseen,
+            all_question_ids,
+        )
+        st.rerun()
+
+    unresolved = [question for question in paper.questions if not question.answer or not question.analysis]
+    if unresolved:
+        with st.container(border=True):
+            st.markdown("#### DeepSeek 智能解析")
+            st.caption(
+                f"本卷还有 {len(unresolved)} 题缺少完整答案或解析。可一次生成并自动加入网页预览与解析版 PDF。"
+            )
+            generate_ai = st.button(
+                "用 DeepSeek 补全本卷解析",
+                disabled=not bool(deepseek_api_key.strip()),
+                use_container_width=True,
+            )
+            if not deepseek_api_key.strip():
+                st.info("请先在左侧填写 DeepSeek API Key。")
+            if generate_ai:
+                try:
+                    with st.spinner(f"正在让 {deepseek_model} 逐题校验并生成解析……"):
+                        generated = DeepSeekClient(
+                            api_key=deepseek_api_key,
+                            model=deepseek_model,
+                        ).generate_solutions(unresolved)
+                    ai_solution_cache.update(generated)
+                    apply_ai_solutions(paper, ai_solution_cache)
+                    st.session_state.pop("pdf_solutions", None)
+                    st.success(f"已生成 {len(generated)} 题解析；建议结合教材复核关键结论。")
+                except DeepSeekError as exc:
+                    st.error(str(exc))
 
     question_index = 0
     for question_type in QUESTION_TYPES:
@@ -500,7 +610,7 @@ if paper:
         )
         for question in group:
             question_index += 1
-            render_question(question, question_index)
+            render_question(question, question_index, question.id in ai_solution_cache)
 
     with st.container(border=True):
         st.markdown('<span class="export-anchor"></span>', unsafe_allow_html=True)
