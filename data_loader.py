@@ -58,7 +58,16 @@ class DataLoader:
             report.warnings.append(f"数据路径不是目录：{self.data_dir}")
             return report
 
-        json_files = sorted(self.data_dir.rglob("*.json"))
+        def _is_hidden_path(path: Path) -> bool:
+            try:
+                rel = path.relative_to(self.data_dir)
+            except ValueError:
+                rel = path
+            return any(part.startswith(".") for part in rel.parts)
+
+        json_files = sorted(
+            path for path in self.data_dir.rglob("*.json") if not _is_hidden_path(path)
+        )
         markdown_roots = [self.data_dir, *self.content_dirs]
         markdown_files = sorted({
             path
@@ -66,6 +75,7 @@ class DataLoader:
             if root.exists() and root.is_dir()
             for pattern in ("*.md", "*.markdown")
             for path in root.rglob(pattern)
+            if not any(part.startswith(".") for part in path.relative_to(root).parts)
         })
         report.json_files = len(json_files)
         report.markdown_files = len(markdown_files)
