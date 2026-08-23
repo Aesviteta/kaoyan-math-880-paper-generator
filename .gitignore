@@ -11,7 +11,7 @@ htmlcov/
 streamlit.stdout.log
 streamlit.stderr.log
 qa-*.png
-config.toml
+/config.toml
 .streamlit/secrets.toml
 *.pdf
 task_plan.md
