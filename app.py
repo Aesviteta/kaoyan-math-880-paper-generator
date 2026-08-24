@@ -3,7 +3,6 @@ from __future__ import annotations
 import html
 import os
 import re
-from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -352,6 +351,7 @@ def build_paper(
         prefer_unseen=prefer_unseen,
     )
     st.session_state.paper = PaperEngine(questions).generate(request)
+    st.session_state.paper_counter = st.session_state.get("paper_counter", 0) + 1
     updated_seen = seen_question_ids | {question.id for question in st.session_state.paper.questions}
     st.session_state.seen_question_ids = updated_seen
     st.query_params["seen"] = encode_seen(updated_seen, all_question_ids)
@@ -625,7 +625,7 @@ if paper:
                 st.download_button(
                     "下载试卷纯享版",
                     st.session_state.pdf_clean,
-                    file_name=f"{paper.title}_纯享版_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    file_name=f"{paper.title}_纯享版_第{st.session_state.get('paper_counter', 1):02d}套.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
@@ -636,7 +636,7 @@ if paper:
                 st.download_button(
                     "下载试卷+解析版",
                     st.session_state.pdf_solutions,
-                    file_name=f"{paper.title}_解析版_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    file_name=f"{paper.title}_解析版_第{st.session_state.get('paper_counter', 1):02d}套.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
