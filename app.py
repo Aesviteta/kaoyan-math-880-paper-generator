@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -624,7 +625,7 @@ if paper:
                 st.download_button(
                     "下载试卷纯享版",
                     st.session_state.pdf_clean,
-                    file_name=f"{paper.title}_试卷纯享版.pdf",
+                    file_name=f"{paper.title}_纯享版_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
@@ -635,7 +636,7 @@ if paper:
                 st.download_button(
                     "下载试卷+解析版",
                     st.session_state.pdf_solutions,
-                    file_name=f"{paper.title}_试卷+解析与踩坑提示版.pdf",
+                    file_name=f"{paper.title}_解析版_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
