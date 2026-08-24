@@ -340,8 +340,11 @@ def build_paper(
         st.error("至少保留一种难度权重。")
         return
 
+    next_counter = st.session_state.get("paper_counter", 0) + 1
+    title = re.sub(r"(拼好卷\s*)\d+", rf"\g<1>{next_counter:02d}", title.strip()) or "考研数学《880》智能拼好卷"
+
     request = PaperRequest(
-        title=title.strip() or "考研数学《880》智能拼好卷",
+        title=title,
         counts=counts,
         chapters=set(selected_chapters),
         difficulty_weights=difficulty_weights,
@@ -351,7 +354,7 @@ def build_paper(
         prefer_unseen=prefer_unseen,
     )
     st.session_state.paper = PaperEngine(questions).generate(request)
-    st.session_state.paper_counter = st.session_state.get("paper_counter", 0) + 1
+    st.session_state.paper_counter = next_counter
     updated_seen = seen_question_ids | {question.id for question in st.session_state.paper.questions}
     st.session_state.seen_question_ids = updated_seen
     st.query_params["seen"] = encode_seen(updated_seen, all_question_ids)
@@ -625,7 +628,7 @@ if paper:
                 st.download_button(
                     "下载试卷纯享版",
                     st.session_state.pdf_clean,
-                    file_name=f"{paper.title}_纯享版_第{st.session_state.get('paper_counter', 1):02d}套.pdf",
+                    file_name=f"{paper.title}_纯享版.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
@@ -636,7 +639,7 @@ if paper:
                 st.download_button(
                     "下载试卷+解析版",
                     st.session_state.pdf_solutions,
-                    file_name=f"{paper.title}_解析版_第{st.session_state.get('paper_counter', 1):02d}套.pdf",
+                    file_name=f"{paper.title}_解析版.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
